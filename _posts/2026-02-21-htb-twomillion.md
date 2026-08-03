@@ -32,17 +32,17 @@ Credential Reuse → SSH as admin
 CVE-2023-0386 → Root
 ```
 
-Trong machine này, nhiều điểm yếu tương đối đơn giản được nối lại thành một chuỗi compromise hoàn chỉnh.
+Từng bước trong TwoMillion đều không khó, nhưng ghép lại đủ tạo thành một chain hoàn chỉnh từ unauth đến root.
 
 ## Các kỹ thuật được sử dụng
 
 - Kiểm tra và deobfuscate client-side JavaScript.
 - Enumerate một authenticated REST API.
-- Suy luận yêu cầu của request thông qua sự thay đổi trong API error message.
-- Khai thác Broken Function Level Authorization để gọi administrative action.
-- Khai thác OS command injection do ứng dụng xây dựng shell command không an toàn.
+- Suy ra tham số request cần thiết dựa vào error message thay đổi qua từng lần gọi.
+- Khai thác Broken Function Level Authorization để gọi API của admin.
+- Khai thác OS command injection.
 - Lateral movement thông qua credential reuse.
-- Xác minh và khai thác Linux kernel dễ bị tấn công trong môi trường lab được kiểm soát.
+- Xác định và khai thác lỗ hổng Linux kernel để lên root.
 
 ## 1. Initial Enumeration
 
@@ -132,7 +132,7 @@ curl -sX POST \
   http://2million.htb/api/v1/invite/how/to/generate | jq
 ```
 
-Response trả về một thông điệp được encode bằng ROT13, decode thông điệp đó:
+Response trả về một thông điệp đã được encode bằng ROT13. Decode thông điệp này:
 
 ```bash
 curl -sX POST \
@@ -161,7 +161,7 @@ curl -sX POST \
   | base64 -d
 ```
 
-Nhập giá trị đã decode vào trang `invite` rồi đăng kí tài khoản.
+Nhập giá trị đã decode vào trang `invite` rồi đăng ký tài khoản.
 
 ![Đăng ký tài khoản trên TwoMillion](/assets/img/twomillion/07-registration.png)
 
@@ -181,7 +181,7 @@ Host: 2million.htb
 Cookie: PHPSESSID=<SESSION_ID>
 ```
 
-Request này cho thấy ứng dụng sử dụng một versioned API dưới base path `/api/v1`.
+Dấu `//` trong đường dẫn gợi ý một path parameter đang bị bỏ trống — chi tiết này sẽ hữu ích khi enumerate các route khác dưới base path `/api/v1`.
 
 ### 3.2. Khám phá các API route
 
@@ -223,7 +223,7 @@ Response xác nhận tài khoản hiện tại chỉ là normal user:
 }
 ```
 
-## 4. Leo thang Web Account lên Administrator
+## 4. Leo thang từ User lên Admin
 
 ### 4.1. Thăm dò settings endpoint
 
@@ -237,7 +237,7 @@ curl -sX PUT \
   --cookie 'PHPSESSID=<SESSION_ID>' | jq
 ```
 
-Thay vì trả về `401 Unauthorized`, endpoint báo lỗi thiếu `Content-Type`. Điều này cho thấy request đã đi tới handler mặc dù account hiện tại không phải admin, đây là dấu hiệu tốt
+Thay vì trả về `401 Unauthorized`, endpoint báo lỗi thiếu `Content-Type`. Điều này cho thấy request đã đi tới handler dù account hiện tại không phải admin — một dấu hiệu tốt để tiếp tục khai thác.
 
 **Bước 2 — Thêm `Content-Type: application/json`:**
 
@@ -376,7 +376,7 @@ DB_USERNAME=admin
 DB_PASSWORD=SuperDuperPass123
 ```
 
-Từ file `.env` chứa tên người dùng và mật khẩu cơ sở dữ liệu. Thử kiểm tra file `/etc/passwd` để xem user `admin` có tồn tại trong hệ thống hay không:
+Với thông tin đăng nhập vừa có được, thử kiểm tra file `/etc/passwd` để xem user `admin` có tồn tại trong hệ thống hay không:
 
 ```bash
 cat /etc/passwd | grep admin
@@ -404,7 +404,7 @@ cat ~/user.txt
 
 ### 7.1. Đọc local mail
 
-Từ những gợi ý, biết rằng `admin` phải kiểm tra mail system của linux, Chúng ta tìm thấy tệp quản trị trong thư mục mail, tệp này chứa thư từ `ch4p` liên quan đến việc vá lỗi hệ điều hành:
+Theo gợi ý của machine, admin có thói quen kiểm tra mail hệ thống local. Trong hộp thư của user `admin`, tìm thấy một email từ `ch4p` đề cập đến việc vá lỗi hệ điều hành:
 
 ```bash
 From: ch4p <ch4p@2million.htb>
@@ -423,7 +423,7 @@ HTB Godfather
 
 ```
 
-Nội dung email cảnh báo về các Linux kernel vulnerability, đồng thời đề cập cụ thể tới OverlayFS và FUSE
+Nội dung email cảnh báo về các Linux kernel vulnerability, đồng thời đề cập cụ thể tới OverlayFS và FUSE.
 
 ### 7.2. Kiểm tra kernel và distribution
 
@@ -464,7 +464,7 @@ Upload archive sang target qua SSH:
 scp cve.zip admin@2million.htb:/tmp/
 ```
 
-Trên target tiến hành giải nén và build:
+Trên target, giải nén và build:
 
 ```bash
 cd /tmp
@@ -507,7 +507,7 @@ cat /root/root.txt
 
 ![Root shell sau khi khai thác CVE-2023-0386](/assets/img/twomillion/root-shell.png)
 
-## 8. Post-Exploitation Root-Cause Analysis
+## 8. Root Cause Analysis
 
 > Các source code snippet dưới đây được đưa vào để phân tích root cause sau exploitation, dựa trên official walkthrough. Những đoạn code này giúp giải thích nguyên nhân của hành vi đã quan sát được; chúng không bắt buộc phải được tìm thấy trong quá trình khai thác ban đầu.
 
@@ -575,7 +575,7 @@ $output = file_get_contents($path);
 
 Ngoài ra, có thể áp dụng allowlist để giới hạn format hợp lệ của username:
 
-```regex
+```
 ^[A-Za-z0-9_-]{1,32}$
 ```
 
@@ -591,17 +591,19 @@ Ngoài ra, có thể áp dụng allowlist để giới hạn format hợp lệ c
 
 ## 10. Kết luận
 
-TwoMillion có một compromise chain rõ ràng: invite workflow làm lộ đường dẫn tạo account, authenticated API chứa broken authorization check và administrative VPN endpoint tồn tại command injection.
+Chain của TwoMillion đi từ invite workflow lộ cách tạo account, qua authorization check sai ở API, đến command injection ngay trên endpoint admin.
 
-Shell dưới quyền `www-data` làm lộ credentials trong application environment. Password reuse tiếp tục cung cấp SSH access dưới quyền `admin`, sau đó vulnerable kernel cho phép privilege escalation lên `root`.
+Có shell www-data xong thì mọi thứ khá nhanh: .env lộ credential DB, credential đó tái dùng để SSH vào admin, và kernel cũ thì dính sẵn CVE để lên root.
 
-Phần thú vị nhất đối với tôi là giai đoạn API enumeration. Mỗi thay đổi trong response lại làm lộ thêm một yêu cầu mới, bao gồm expected content type, parameter name và accepted data type. Từ các response này, có thể suy luận request đã đi sâu tới đâu trong handler và backend đang xử lý input theo thứ tự nào.
+Phần mình thích nhất là đoạn enumerate API. Mỗi lần thiếu gì, response lại lộ thêm một field bắt buộc — content type, tên parameter, kiểu dữ liệu. Cứ theo dấu vậy là đoán được request đang đi tới đâu trong handler và backend validate theo thứ tự nào.
 
 ## Lời cảm ơn
 
-Cảm ơn Hack The Box và tất cả những người đã tham gia xây dựng TwoMillion. Quá trình hoàn thành machine và xem lại official material đã giúp tôi hiểu rõ hơn về toàn bộ attack chain cũng như root cause của từng lỗ hổng.
+Cảm ơn Hack The Box và đội ngũ đã tạo ra TwoMillion — một machine được thiết kế rất khéo, mỗi bước đều dạy một bài học riêng chứ không chỉ đơn thuần là nối chuỗi khai thác.
 
-Cảm ơn bạn đã dành thời gian đọc writeup này.
+Cảm ơn cộng đồng CTF và những anh/chị đã chia sẻ kiến thức, tài liệu để mình có thể đối chiếu và hiểu sâu hơn về root cause của từng lỗ hổng trong quá trình hoàn thành máy này.
+
+Và cảm ơn bạn đã đọc đến tận đây. Nếu thấy bài viết hữu ích hoặc có góp ý gì, mình luôn sẵn sàng lắng nghe.
 
 ## Tài liệu tham khảo
 
