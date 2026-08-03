@@ -7,7 +7,7 @@ pin: false
 author: idkwhy07
 ---
 
-> **Tuyên bố về case study giả lập:** Umber Desk 12, Northstar Relay Software, mọi tổ chức, người dùng, request, response và lỗ hổng trong bài viết này đều là hư cấu. Bài viết không mô tả một lỗ hổng đã được công bố trong sản phẩm thực tế.
+> **Tuyên bố về case study giả lập:** Umber Desk 12, mọi tổ chức, người dùng, request, response và lỗ hổng trong bài viết này đều là hư cấu. Bài viết không mô tả một lỗ hổng đã được công bố trong sản phẩm thực tế.
 
 ## Hệ thống được kiểm thử
 
