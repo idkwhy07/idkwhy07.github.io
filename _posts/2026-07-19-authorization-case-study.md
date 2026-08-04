@@ -17,15 +17,15 @@ Toàn bộ HTTP traffic được ghi lại từ một Flask fixture server tự 
 
 Năm finding tập trung vào năm authorization boundary khác nhau:
 
-| Finding | Boundary bị phá vỡ | Kết quả |
+| Authorization boundary | Hành vi được kiểm thử | Kết quả |
 |---|---|---|
-| F-01 | Ownership giữa hai user cùng role | Ben đọc được note của Alex |
-| F-02 | Quyền trên từng property | Analyst tự chuyển note sang `approved` |
-| F-03 | Tenant scope | Manager đọc được case của organization khác |
-| F-04 | Parent-child relationship | Evidence của case khác được truy cập qua một nested path hợp lệ |
-| F-05 | Direct và indirect access path | Export worker đọc được evidence cross-tenant dù direct endpoint trả `403` |
+| Ownership boundary | Analyst đọc note của người dùng khác | Ben đọc được note của Alex |
+| Property-level authorization | Analyst cập nhật `review_status` | Ben tự chuyển note sang `approved` |
+| Tenant boundary | Manager đọc case cross-tenant | Daniel đọc được case của `org_02` |
+| Parent-child relationship | Thay `evidence_id` trong nested route | Endpoint trả evidence của case khác |
+| Indirect access path | Export source object cross-tenant | Worker trả evidence của `org_02` dù direct endpoint trả `403` |
 
-F-01 và F-05 được trình bày đầy đủ theo quy trình:
+Hai test case về ownership boundary và indirect access path được trình bày đầy đủ theo quy trình:
 
 ```text
 Hiểu policy
@@ -41,7 +41,7 @@ Dùng tài khoản thứ hai để xác minh độc lập
 Phân tích root cause, sửa lỗi và retest
 ```
 
-F-02 đến F-04 sử dụng cùng phương pháp nhưng được rút gọn để bài không lặp lại cùng một cấu trúc quá nhiều lần.
+Ba test case còn lại sử dụng cùng phương pháp nhưng được rút gọn để bài không lặp lại cùng một cấu trúc quá nhiều lần.
 
 ## Bối cảnh hệ thống
 
@@ -145,6 +145,21 @@ org_02 — Ternwick Transit Cooperative
     └── evidence_03 — case_id: case_03 — version: 1
 ```
 
+Ba relationship quan trọng cần ghi nhớ:
+
+```text
+Ben  ──được assign──> case_01 ──chứa──> evidence_01
+Ben  ──sở hữu───────> note_01
+
+Alex ──được assign──> case_02 ──chứa──> evidence_02
+Alex ──sở hữu───────> note_02
+
+Leo  ──được assign──> case_03 ──chứa──> evidence_03
+Leo  ──sở hữu───────> note_03
+```
+
+`case_01` và `case_02` cùng thuộc `org_01`, nhưng được giao cho hai Analyst khác nhau. `case_03` thuộc `org_02`, vì vậy user của `org_01` phải bị chặn bởi tenant boundary trước khi có thể truy cập object này.
+
 ## API surface được sử dụng trong case study
 
 Case study chỉ tập trung vào các API trực tiếp liên quan đến năm Authorization boundary được kiểm thử. Các endpoint khác của hệ thống không được liệt kê vì không tham gia trực tiếp vào finding hoặc quá trình xác minh.
@@ -161,7 +176,7 @@ Case study chỉ tập trung vào các API trực tiếp liên quan đến năm 
 
 Các endpoint đăng nhập, `/api/v1/me`, review queue, direct evidence endpoint và audit stream được dùng để chuẩn bị authenticated session, thiết lập baseline hoặc xác minh server-side state. Chúng không phải access path bị khai thác trực tiếp trong phần lớn finding, nhưng vẫn đóng vai trò positive control hoặc cung cấp bằng chứng độc lập khi cần.
 
-## Authentication và Authorization
+## Session xác định danh tính, Authorization quyết định quyền truy cập
 
 Ứng dụng sử dụng **opaque server-side session**. Khi đăng nhập thành công, trình duyệt nhận một session cookie. Server dùng cookie đó để xác định user, organization mà user đang tham gia, role của user trong từng organization và trạng thái thành viên hiện tại.
 
@@ -263,7 +278,7 @@ Các session còn lại:
 
 Trong mỗi test, session của actor được giữ nguyên. Chỉ một giá trị ảnh hưởng đến Authorization, chẳng hạn resource ID hoặc property trong request, được thay đổi tại một thời điểm.
 
-## F-01 — Bypass ownership boundary trong cùng tenant
+## Ownership boundary — Analyst đọc note của người dùng khác
 
 Mục tiêu của test đầu tiên là xác định endpoint đọc note có kiểm tra ownership hay chỉ xác nhận người gọi là member đang hoạt động trong organization chứa note. Nếu API coi mọi Analyst trong cùng tenant là tương đương, Ben có thể đọc note của Alex dù hai người sở hữu các object khác nhau.
 
@@ -385,7 +400,7 @@ Kết quả xác nhận endpoint đang trả về trạng thái hiện tại c�
 
 **Tác động:** Một Analyst có thể đọc nội dung note thuộc người dùng khác trong cùng tenant. Tùy dữ liệu được lưu trong note, lỗ hổng có thể làm lộ kết quả phân tích, nhận xét nội bộ hoặc thông tin compliance chưa được công bố.
 
-## F-02 — Analyst tự approve note qua mass assignment
+## Property-level authorization — Analyst tự approve note
 
 Update endpoint kiểm tra đúng việc Ben có sở hữu `note_01`, nhưng có thể tự động bind toàn bộ JSON body vào model. Nếu `review_status` không được allowlist theo role, Analyst có thể tự thực hiện state transition chỉ dành cho Manager hoặc Owner.
 
@@ -433,7 +448,7 @@ Frontend không hiển thị nút approve cho Analyst, nhưng giới hạn giao 
 
 **Tác động:** Analyst có thể tự đánh dấu nội dung của mình là đã được review, làm sai workflow phê duyệt và khiến dữ liệu chưa được Manager kiểm tra xuất hiện như một kết quả hợp lệ.
 
-## F-03 — Manager đọc case của organization khác
+## Tenant boundary — Manager đọc case cross-tenant
 
 Manager endpoint có thể chỉ kiểm tra `role in {manager, owner}`, sau đó truy vấn case bằng global ID. Nếu query không được scope theo organization nơi role đó có hiệu lực, Daniel có thể đọc `case_03` thuộc `org_02`.
 
@@ -465,7 +480,7 @@ Daniel đúng là Manager, nhưng quyền Manager của Daniel chỉ có hiệu 
 
 **Tác động:** Một Manager có thể đọc hồ sơ compliance của khách hàng khác. Đây là cross-tenant data exposure và có thể phá vỡ yêu cầu cô lập dữ liệu cốt lõi của hệ thống SaaS multi-tenant.
 
-## F-04 — Bypass parent-child relationship trong nested route
+## Parent-child relationship — Nested route trả về evidence của case khác
 
 Controller có thể authorize Ben dựa trên `org_01` và `case_01`, nhưng truy vấn evidence cuối cùng bằng một global `evidence_id`. Nếu server không kiểm tra `evidence.case_id == case_id`, một child không được phép truy cập có thể “đi ké” dưới path của một parent hợp lệ.
 
@@ -508,7 +523,7 @@ Controller đã authorize parent path nhưng chưa xác nhận child thực sự
 
 **Tác động:** Analyst có thể đọc evidence của case không được assign cho mình bằng cách đặt `evidence_id` trái phép dưới một nested path hợp lệ.
 
-## F-05 — Export evidence cross-tenant qua asynchronous worker
+## Indirect access path — Export worker đọc evidence cross-tenant
 
 Test cuối cùng kiểm tra cùng một object policy có được áp dụng nhất quán ở cả direct endpoint và export worker hay không. Direct evidence endpoint đã kiểm tra assignment và tenant, trong khi export API tạo một job để worker xử lý sau.
 
@@ -694,15 +709,15 @@ Audit state của tenant thứ hai xác nhận worker đã xử lý một protec
 
 ## Tổng hợp finding
 
-| ID | Request chứng minh lỗi | Boundary bị phá vỡ | Hành vi mong đợi | Hành vi thực tế | Phân loại |
-|---|---|---|---|---|---|
-| F-01 | Ben gọi `GET /api/v1/notes/note_02` | Ownership giữa hai user cùng role | Deny | Trả trạng thái hiện tại của note thuộc Alex | Horizontal object-level authorization failure |
-| F-02 | Ben gửi `review_status: approved` khi update `note_01` | Protected property | Từ chối property | Chuyển note sang `approved` | Broken object property-level authorization / mass assignment |
-| F-03 | Daniel gọi `GET /api/v1/manager/cases/case_03` | Tenant scope | Deny | Trả case của `org_02` | Missing tenant-scope check |
-| F-04 | Ben gọi path `case_01/evidence/evidence_02` | Parent-child relationship | Deny | Trả child của `case_02` | Unvalidated parent-child relationship |
-| F-05 | Ben export `evidence_03` | Direct và indirect path | Không tạo job | Worker hoàn tất và trả file | Indirect-path authorization bypass |
+| Boundary | Request chứng minh lỗi | Hành vi mong đợi | Hành vi thực tế | Phân loại |
+|---|---|---|---|---|
+| Ownership boundary | Ben gọi `GET /api/v1/notes/note_02` | Deny | Trả trạng thái hiện tại của note thuộc Alex | Horizontal object-level authorization failure |
+| Property-level authorization | Ben gửi `review_status: approved` khi update `note_01` | Từ chối property | Chuyển note sang `approved` | Broken object property-level authorization / mass assignment |
+| Tenant boundary | Daniel gọi `GET /api/v1/manager/cases/case_03` | Deny | Trả case của `org_02` | Missing tenant-scope check |
+| Parent-child relationship | Ben gọi path `case_01/evidence/evidence_02` | Deny | Trả evidence của `case_02` | Unvalidated parent-child relationship |
+| Indirect access path | Ben export `evidence_03` | Không tạo job | Worker hoàn tất và trả file | Indirect-path authorization bypass |
 
-F-01, F-03, F-04 và F-05 đều là object-level authorization failure nhưng xảy ra tại các boundary khác nhau. F-02 là property-level authorization failure: actor có quyền trên object nhưng không có quyền trên property được gửi lên.
+Các lỗi ở ownership boundary, tenant boundary, parent-child relationship và indirect access path đều là object-level authorization failure nhưng xảy ra tại những boundary khác nhau. Lỗi property-level authorization xảy ra khi actor có quyền trên object nhưng không có quyền trên property được gửi lên.
 
 ## Root cause chung
 
@@ -730,13 +745,13 @@ allow = policy(
 
 Trong mỗi vulnerable path, hệ thống bỏ sót ít nhất một dữ kiện:
 
-| Finding | Dữ kiện bị thiếu |
+| Authorization boundary | Dữ kiện bị thiếu |
 |---|---|
-| F-01 | Ownership của note |
-| F-02 | Quyền trên property và state transition |
-| F-03 | Tenant của resource so với organization nơi role của user có hiệu lực |
-| F-04 | Relationship giữa evidence và case |
-| F-05 | Quyền trên source object tại API, worker và download endpoint |
+| Ownership boundary | Ownership của note |
+| Property-level authorization | Quyền trên property và state transition |
+| Tenant boundary | Tenant của resource so với organization nơi role của user có hiệu lực |
+| Parent-child relationship | Relationship giữa evidence và case |
+| Indirect access path | Quyền trên source object tại API, worker và download endpoint |
 
 Codebase sử dụng các method như `get_note(id)`, `get_case(id)`, `get_evidence(id)` hoặc `model.update(request.json)` trước khi thu thập đủ authorization context. Việc enforcement bị phân tán khiến mỗi code path chỉ nhìn thấy một phần của context: một controller chỉ kiểm tra người gọi có phải là member của organization hay không, controller khác chỉ kiểm tra role hoặc assignment, còn worker chỉ kiểm tra job ownership. Mỗi phép kiểm tra riêng lẻ có thể đúng, nhưng không phép kiểm tra nào đủ để bảo vệ toàn bộ operation.
 
@@ -802,7 +817,7 @@ def require(condition: bool) -> None:
 
 Trong mỗi request, principal phải được tạo từ session cùng thông tin hiện tại trong database: user thuộc organization nào, có role gì và trạng thái thành viên đang là `active`, `suspended` hay đã bị thu hồi.
 
-### Khắc phục F-01: kiểm tra ownership khi đọc note
+### Khắc phục ownership boundary: kiểm tra ownership khi đọc note
 
 Handler dễ mắc lỗi khi thực hiện global lookup rồi chỉ xác nhận user là member của organization:
 
@@ -835,7 +850,7 @@ def read_note(principal: Principal, note_id: str) -> dict:
 
 Bản sửa cố ý trả `404 Not Found` khi Analyst không sở hữu note để không làm lộ sự tồn tại của object. Hệ thống có thể chọn `403` thay thế, miễn mọi unauthorized relationship đều bị từ chối nhất quán.
 
-### Khắc phục F-02: allowlist property và tách approve thành action riêng
+### Khắc phục property-level authorization: allowlist field và tách approve thành action riêng
 
 Handler dễ mắc lỗi khi authorize quyền update note rồi bind toàn bộ JSON body vào model:
 
@@ -880,7 +895,7 @@ def approve_note(principal: Principal, note_id: str) -> dict:
 
 Thiết kế này tránh việc một quyền update object quá rộng vô tình trở thành quyền ghi mọi field của database model.
 
-### Khắc phục F-03: đưa tenant scope vào query
+### Khắc phục tenant boundary: đưa tenant scope vào query
 
 Manager endpoint dễ mắc lỗi khi chỉ kiểm tra role rồi thực hiện global lookup:
 
@@ -922,7 +937,7 @@ def read_manager_case(
 
 `organization_id` trong URL chỉ là selector. Nó không tự tạo quyền. Server vẫn phải xác nhận user thực sự là member đang hoạt động trong organization đó và role hiện tại cho phép thực hiện action.
 
-### Khắc phục F-04: ràng buộc đầy đủ nested relationship
+### Khắc phục parent-child relationship: ràng buộc đầy đủ nested path
 
 Vulnerable pattern:
 
@@ -947,7 +962,7 @@ WHERE e.id = :evidence_id
 
 Evidence chỉ được trả về khi đồng thời khớp `evidence_id + case_id + organization_id`, vì vậy client không còn có thể gắn một child không liên quan vào một parent hợp lệ. Sau khi resolve đúng `case` và `evidence` theo toàn bộ relationship trong URL, service vẫn phải gọi `can_read_evidence(principal, case, evidence)` để kiểm tra tenant, role và assignment của subject trước khi trả dữ liệu.
 
-### Khắc phục F-05: authorize tại API, worker và download endpoint
+### Khắc phục indirect access path: authorize tại API, worker và download endpoint
 
 Theo policy của Umber Desk 12, worker phải đánh giá lại quyền tại thời điểm thực thi. API trước hết authorize source object rồi mới tạo job:
 
@@ -1059,6 +1074,16 @@ Bản sửa sử dụng một `Principal` chứa organization, role và trạng 
 Đây là tiêu chí quan trọng của một bản sửa Authorization đúng:
 
 > Chặn sai quyền nhưng không phá vỡ đúng quyền.
+
+## Thuật ngữ sử dụng trong bài
+
+- **Baseline**: request hợp lệ dùng làm mốc so sánh.
+- **Positive control**: hành vi hợp lệ phải tiếp tục hoạt động sau khi sửa.
+- **Mass assignment**: backend tự động bind nhiều field từ request vào model mà không allowlist rõ ràng.
+- **State transition**: thay đổi trạng thái nghiệp vụ, ví dụ từ `draft` sang `approved`.
+- **Scoped query**: query giới hạn resource theo tenant, owner hoặc relationship cần thiết.
+- **Fail closed**: khi không đủ dữ kiện hoặc authorization thất bại, hệ thống từ chối thao tác.
+- **`ETag` / `If-Match`**: cơ chế giúp tránh ghi đè khi object đã bị thay đổi bởi request khác.
 
 ## Tài liệu tham khảo
 
