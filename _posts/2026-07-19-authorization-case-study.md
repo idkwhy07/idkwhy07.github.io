@@ -1138,16 +1138,6 @@ Phần sửa sử dụng một `Principal` chứa organization, role và trạng
 
 Cuối cùng, một bản sửa Authorization đúng cần đạt được tiêu chí `Chặn sai quyền nhưng không phá vỡ đúng quyền`
 
-## 9 điều rút ra từ 5 lỗi này
-
-- **Baseline**: request hợp lệ dùng làm mốc so sánh.
-- **Positive control**: hành vi hợp lệ phải tiếp tục hoạt động sau khi sửa.
-- **Mass assignment**: backend tự động bind nhiều field từ request vào model mà không allowlist rõ ràng.
-- **State transition**: thay đổi trạng thái nghiệp vụ, ví dụ từ `draft` sang `approved`.
-- **Scoped query**: query giới hạn resource theo tenant, owner hoặc relationship cần thiết.
-- **Fail closed**: khi không đủ dữ kiện hoặc authorization thất bại, hệ thống từ chối thao tác.
-- **`ETag` / `If-Match`**: cơ chế giúp tránh ghi đè khi object đã bị thay đổi bởi request khác.
-
 ## Tài liệu tham khảo
 
 - [OWASP API Security Top 10 — API1:2023 Broken Object Level Authorization](https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/)
