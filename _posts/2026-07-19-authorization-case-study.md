@@ -783,9 +783,7 @@ Codebase sử dụng các method như `get_note(id)`, `get_case(id)`, `get_evide
 
 ## Thiết kế Authorization an toàn hơn
 
-Hướng khắc phục là đưa Authorization vào service layer bắt buộc, thay vì để từng controller tự quyết định có kiểm tra hay không.
-
-Route có thể parse input và tạo response, nhưng không được trực tiếp dùng unrestricted repository để lấy protected resource.
+Hướng khắc phục là đưa Authorization vào service layer bắt buộc, thay vì để từng controller tự quyết định có kiểm tra hay không: route có thể parse input và tạo response, nhưng không được trực tiếp dùng unrestricted repository để lấy protected resource.
 
 ### Principal dùng chung cho mọi authorization decision
 
@@ -939,15 +937,7 @@ case = cases.get_by_id(case_id)
 return serialize(case)
 ```
 
-Sau khi sửa, organization context phải được xác định từ organization mà server đã xác nhận user đang là member hợp lệ.
-
-Endpoint được đổi thành:
-
-```http
-GET /api/v1/orgs/{organization_id}/manager/cases/{case_id}
-```
-
-Service:
+Sau khi sửa, organization context phải được xác định từ organization mà server đã xác nhận user đang là member hợp lệ. Endpoint được đổi thành `GET /api/v1/orgs/{organization_id}/manager/cases/{case_id}`, và service tương ứng như sau:
 
 ```python
 def read_manager_case(
@@ -973,7 +963,7 @@ def read_manager_case(
 
 ### Khắc phục parent-child relationship: ràng buộc đầy đủ nested path
 
-Vulnerable pattern:
+Controller dễ mắc lỗi khi authorize đúng case ở parent path nhưng lại query evidence bằng global ID, không ràng buộc `evidence.case_id`:
 
 ```python
 case = cases.get_by_id(case_id)
