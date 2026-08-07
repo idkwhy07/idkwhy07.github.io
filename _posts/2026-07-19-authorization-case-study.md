@@ -9,6 +9,8 @@ author: idkwhy07
 
 > **Lưu ý:** Đây là một case study giả lập. Tên hệ thống, organization, người dùng, request, response và toàn bộ lỗ hổng đều là hư cấu. Bài viết không mô tả lỗ hổng của một sản phẩm thực tế.
 
+Toàn bộ source code được public tại [multi-tenant-authorization-lab](https://github.com/idkwhy07/multi-tenant-authorization-lab). Mọi request trong bài đều tái lập được bằng cách chạy server này.
+
 ## Tóm tắt nhanh
 
 Trong bài này, tôi dựng lại một cuộc kiểm thử **Authorization** trên **Umber Desk 12**. Đây là một ứng dụng SaaS multi-tenant dùng để quản lý tài liệu compliance.
@@ -97,9 +99,7 @@ Hai ví dụ trên thể hiện hai boundary khác nhau:
 
 ## Môi trường và dữ liệu kiểm thử
 
-Toàn bộ quá trình kiểm thử được thực hiện trên fixture server tại `api.umber-desk-12.test`. Đây là môi trường giả lập được dựng riêng cho case study, không phải một hệ thống thực tế đang hoạt động.
-
-Toàn bộ HTTP traffic được ghi lại từ một Flask fixture server tự dựng, khoảng 220 dòng code. Server có hai chế độ vulnerable và fixed để tái hiện lỗ hổng, áp dụng bản sửa và chạy lại cùng bộ request.
+Toàn bộ quá trình kiểm thử được thực hiện trên môi trường giả lập được dựng bằng Flask riêng cho case study, không phải một hệ thống thực tế đang hoạt động. Source public tại [multi-tenant-authorization-lab](https://github.com/idkwhy07/multi-tenant-authorization-lab). Server có hai chế độ vulnerable và fixed để tái hiện lỗ hổng, áp dụng bản sửa và chạy lại cùng bộ request.
 
 Để dễ theo dõi thay đổi:
 
@@ -146,11 +146,9 @@ org_02 — Ternwick Transit Cooperative
     └── evidence_03 — case_id: case_03 — version: 1
 ```
 
-`case_01` và `case_02` cùng thuộc `org_01`, nhưng được giao cho hai Analyst khác nhau. `case_03` thuộc `org_02`, vì vậy user của `org_01` phải bị chặn bởi tenant boundary trước khi có thể truy cập object này.
+## Authentication, Session và Authorization
 
-## Session xác định danh tính, Authorization quyết định quyền truy cập
-
-Ứng dụng sử dụng **opaque server-side session**. Khi đăng nhập thành công, trình duyệt nhận một session cookie. Server dùng cookie đó để xác định user gửi request. Từ identity này, server load thông tin thành viên, role và trạng thái hiện tại trong database để thực hiện authorization decision.
+Ứng dụng sử dụng **opaque server-side session**. Khi đăng nhập thành công, trình duyệt nhận một session cookie. Server dùng cookie đó để xác định user nào đang gửi request. Từ identity này, server load thông tin thành viên, role và trạng thái hiện tại trong database để thực hiện authorization decision.
 
 Session chỉ giúp server xác định request đến từ ai. Nó không tự động cấp quyền trên case, note, evidence hoặc export.
 
@@ -228,7 +226,9 @@ Case study chỉ tập trung vào các API trực tiếp liên quan đến năm 
 
 Các endpoint đăng nhập, `/api/v1/me`, review queue, direct evidence endpoint và audit stream được dùng để chuẩn bị authenticated session, thiết lập baseline hoặc xác minh server-side state. Chúng không phải access path bị khai thác trực tiếp trong phần lớn finding, nhưng vẫn đóng vai trò positive control hoặc cung cấp bằng chứng độc lập khi cần.
 
-## Chuẩn bị authenticated session
+## Tái hiện 5 lỗ hổng Authorization
+
+### Chuẩn bị authenticated session
 
 Ben đăng nhập để tạo session dùng trong quá trình kiểm thử:
 
@@ -239,7 +239,7 @@ Content-Type: application/json
 
 {
   "email": "ben.miller@meldran.test",
-  "password": "fixture-password"
+  "password": "Secret@123"
 }
 ```
 
@@ -267,7 +267,7 @@ Các session còn lại:
 
 Trong mỗi test, session của actor được giữ nguyên. Chỉ một giá trị ảnh hưởng đến Authorization, chẳng hạn resource ID hoặc property trong request, được thay đổi tại một thời điểm. Một số baseline và request xác minh được rút gọn bằng cách lược bỏ các header không thay đổi hoặc response không cần thiết cho kết luận; vì vậy số thứ tự `X-Request-Id` không phải lúc nào cũng liên tiếp trong bài.
 
-## Ownership boundary — Analyst đọc note của người dùng khác
+### Ownership boundary — Analyst đọc note của người dùng khác
 
 Ở test đầu tiên, tôi tập trung vào endpoint đọc note. Câu hỏi cần kiểm tra khá rõ: endpoint có xác minh ownership hay chỉ cần người gọi là member đang hoạt động trong organization chứa note? Nếu API coi mọi Analyst trong cùng tenant là tương đương, Ben có thể đọc note của Alex dù mỗi người sở hữu một object khác nhau.
 
@@ -389,7 +389,7 @@ Kết quả xác nhận endpoint đang trả về trạng thái hiện tại c�
 
 **Tác động:** Một Analyst có thể đọc nội dung note thuộc người dùng khác trong cùng tenant. Tùy dữ liệu được lưu trong note, lỗ hổng có thể làm lộ kết quả phân tích, nhận xét nội bộ hoặc thông tin compliance chưa được công bố.
 
-## Property-level authorization — Analyst tự approve note
+### Property-level authorization — Analyst tự approve note
 
 Ở test này, ownership check thực ra vẫn hoạt động: Ben đúng là người sở hữu `note_01`. Điểm cần kiểm tra nằm ở bước update. Nếu endpoint tự động bind toàn bộ JSON body vào model mà không allowlist `review_status` theo role, Analyst có thể tự thực hiện state transition vốn chỉ dành cho Manager hoặc Owner.
 
@@ -467,7 +467,7 @@ Frontend không hiển thị nút approve cho Analyst, nhưng giới hạn giao 
 
 **Tác động:** Analyst có thể tự đánh dấu nội dung của mình là đã được review, làm sai workflow phê duyệt và khiến dữ liệu chưa được Manager kiểm tra xuất hiện như một kết quả hợp lệ.
 
-## Tenant boundary — Manager đọc case cross-tenant
+### Tenant boundary — Manager đọc case cross-tenant
 
 Test tiếp theo chuyển từ ownership sang tenant scope. Manager endpoint có thể chỉ kiểm tra `role in {manager, owner}`, rồi truy vấn case bằng global ID. Nếu query không được scope theo organization nơi role đó có hiệu lực, Daniel có thể đọc `case_03` thuộc `org_02`.
 
@@ -499,7 +499,7 @@ Daniel đúng là Manager, nhưng quyền Manager của Daniel chỉ có hiệu 
 
 **Tác động:** Một Manager có thể đọc hồ sơ compliance của khách hàng khác. Đây là cross-tenant data exposure và có thể phá vỡ yêu cầu cô lập dữ liệu cốt lõi của hệ thống SaaS multi-tenant.
 
-## Parent-child relationship — Nested route trả về evidence của case khác
+### Parent-child relationship — Nested route trả về evidence của case khác
 
 Với nested route, một parent hợp lệ chưa chắc kéo theo child hợp lệ. Controller có thể authorize Ben dựa trên `org_01` và `case_01`, nhưng bước cuối lại truy vấn evidence bằng một global `evidence_id`. Nếu server không kiểm tra `evidence.case_id == case_id`, một child không được phép truy cập có thể “đi ké” dưới path của một parent hợp lệ.
 
@@ -542,7 +542,7 @@ Controller đã authorize parent path nhưng chưa xác nhận child thực sự
 
 **Tác động:** Analyst có thể đọc evidence của case không được assign cho mình bằng cách đặt `evidence_id` trái phép dưới một nested path hợp lệ.
 
-## Indirect access path — Export worker đọc evidence cross-tenant
+### Indirect access path — Export worker đọc evidence cross-tenant
 
 Test cuối cùng chuyển sang một access path ít trực tiếp hơn: export worker. Cùng một object policy phải được áp dụng nhất quán ở direct endpoint và ở job chạy nền. Trong fixture này, direct evidence endpoint đã kiểm tra assignment và tenant, còn export API tạo một job để worker xử lý sau.
 
@@ -738,7 +738,7 @@ Audit state của tenant thứ hai xác nhận worker đã xử lý một protec
 
 Các lỗi ở ownership boundary, tenant boundary, parent-child relationship và indirect access path đều là object-level authorization failure nhưng xảy ra tại những boundary khác nhau. Lỗi property-level authorization xảy ra khi actor có quyền trên object nhưng không có quyền trên property được gửi lên.
 
-## Root cause chung
+## Phân tích root cause
 
 Năm finding có nguyên nhân trực tiếp khác nhau, nhưng cùng phản ánh một vấn đề kiến trúc:
 
@@ -781,7 +781,7 @@ Codebase sử dụng các method như `get_note(id)`, `get_case(id)`, `get_evide
 
 Đổi ID tuần tự thành UUID không sửa được lỗi thiết kế này. UUID chỉ làm identifier khó đoán hơn. Khi ID xuất hiện trong traffic, log, search result, link hoặc export, attacker vẫn có thể sử dụng nó nếu backend tiếp tục thực hiện unscoped lookup.
 
-## Thiết kế Authorization an toàn hơn
+## Khắc phục và thiết kế Authorization an toàn hơn
 
 Hướng khắc phục là đưa Authorization vào service layer bắt buộc, thay vì để từng controller tự quyết định có kiểm tra hay không: route có thể parse input và tạo response, nhưng không được trực tiếp dùng unrestricted repository để lấy protected resource.
 
@@ -1080,13 +1080,33 @@ Download endpoint cũng phải kiểm tra job ownership và quyền hiện tại
 
 ## Retest
 
-Trước khi retest, fixture được reset về trạng thái ban đầu:
+Sau khi xác định root cause và áp dụng các bản sửa, tôi chạy lại cùng bộ request trên fixed build để kiểm tra xem năm finding đã thực sự được xử lý hay chưa. Retest ở đây không chỉ kiểm tra các unauthorized request có bị chặn hay không, mà còn phải đảm bảo những workflow hợp lệ trước đó vẫn tiếp tục hoạt động.
 
-- Tất cả resource trở lại `version: 1`.
-- Chưa có export job.
-- Chưa có audit event.
+Fixture server lưu toàn bộ dữ liệu trong memory. Trong quá trình tái hiện các finding, một số request đã làm thay đổi trạng thái của resource, tạo export job và ghi audit event. Vì vậy trước khi chạy lại test, fixture cần được đưa về trạng thái ban đầu. Có thể thực hiện việc này bằng cách restart server hoặc gọi endpoint dành riêng cho test:
 
-Trong fixture này, các endpoint đọc hoặc cập nhật resource trả `404 Not Found` khi object hoặc relationship nằm ngoài visible scope của subject, nhằm tránh làm lộ sự tồn tại của resource. Endpoint tạo export trả `403 Forbidden` khi request hợp lệ về cấu trúc nhưng actor không có quyền thực hiện action export trên source object đã cung cấp. `422 Unprocessable Content` được dùng khi request chứa property không được schema của action chấp nhận. Đây là quy ước của fixture, không phải quy tắc bắt buộc cho mọi hệ thống; điều quan trọng là từ chối nhất quán và không trả dữ liệu trái phép.
+```bash
+curl -X POST http://127.0.0.1:5000/api/v1/_reset
+```
+
+Endpoint này chạy lại dữ liệu từ `seed()`, đưa các resource trở về `version: 1`, đồng thời xóa các export job và audit event đã phát sinh trong lần kiểm thử trước.
+
+Source code sử dụng biến `VULNERABLE_MODE` để chọn implementation đang chạy. Khi tái hiện năm finding, server được chạy với:
+
+```python
+VULNERABLE_MODE = True
+```
+
+Sau khi hoàn tất phần kiểm thử vulnerable build, tôi dừng server, chuyển giá trị này thành `False` rồi khởi động lại ứng dụng:
+
+```bash
+python app.py
+```
+
+Server lúc này sử dụng fixed implementation của cùng các endpoint và bắt đầu lại với fixture data ban đầu. Flag `VULNERABLE_MODE` này nằm trong repo đã dẫn ở đầu bài.
+
+Từ đây, tôi replay chính các request đã dùng để chứng minh năm finding. HTTP method, resource ID, property và các giá trị ảnh hưởng đến Authorization được giữ nguyên để có thể so sánh trực tiếp hành vi trước và sau khi sửa. Với mỗi finding, tôi cũng chạy lại positive control tương ứng để xác nhận bản sửa không vô tình chặn một operation vốn hợp lệ.
+
+Trong fixture này, các request truy cập object hoặc relationship nằm ngoài visible scope trả `404 Not Found`. Export request hợp lệ về cấu trúc nhưng không có quyền trên source object trả `403 Forbidden`, còn property không được action cho phép trả `422 Unprocessable Content`. Đây chỉ là quy ước response của fixture. Điểm cần quan sát trong retest là unauthorized operation không còn trả dữ liệu hoặc thay đổi server-side state, trong khi các operation hợp lệ vẫn giữ nguyên hành vi mong đợi.
 
 | Retest | Trước khi sửa | Sau khi sửa | Xác minh |
 |---|---|---|---|
@@ -1102,9 +1122,9 @@ Trong fixture này, các endpoint đọc hoặc cập nhật resource trả `404
 | Ben export `evidence_01` | `202`, hoàn tất | `202`, hoàn tất | Export hợp lệ không bị phá vỡ |
 | Daniel approve `note_01` | `200` | `200` | Manager vẫn thực hiện được state transition |
 
-Bản build sau khi sửa đã chặn toàn bộ request dùng để chứng minh lỗi, đồng thời giữ nguyên các workflow hợp lệ.
+Sau khi chuyển sang fixed build, toàn bộ request dùng để chứng minh năm finding đều bị từ chối theo policy tương ứng. Các positive control vẫn hoạt động, cho thấy bản sửa chặn unauthorized access mà không làm thay đổi các workflow hợp lệ.
 
-## Bài học thực tế
+## Điều rút ra từ 5 lỗi này
 
 1. Authentication chỉ xác định subject; mỗi action vẫn cần một authorization decision riêng.
 2. Luôn đưa tenant scope vào resource query.
@@ -1124,9 +1144,9 @@ Nhìn riêng từng finding, nguyên nhân trực tiếp không giống nhau. Nh
 
 Phần sửa sử dụng một `Principal` chứa organization, role và trạng thái thành viên hiện tại. Từ đó, hệ thống kết hợp scoped query, property allowlist, relationship-aware lookup và reauthorization tại worker lẫn download endpoint. Kết quả retest cho thấy các unauthorized request đã bị chặn, trong khi workflow hợp lệ vẫn hoạt động.
 
-Điều bất ngờ với tôi không phải là tìm ra 5 lỗi — với một server do chính mình cài lỗi vào thì tìm không khó. Cái khó nằm ở lúc viết fix: mỗi lần sửa một boundary, tôi phải tự hỏi liệu bản sửa có vô tình chặn luôn cả use case hợp lệ hay không, và đó là lý do bảng retest phía trên có cả cột positive control. Đứng ở cả hai vai — người phá và người vá — giúp tôi hiểu rõ hơn vì sao nhiều bản fix Authorization ngoài đời chỉ giải quyết được nửa vấn đề.
+Phần khó nhất trong case study này không nằm ở việc phát hiện 5 lỗi, mà nằm ở lúc viết fix: mỗi lần sửa một boundary, tôi phải tự hỏi liệu bản sửa có vô tình chặn luôn cả use case hợp lệ hay không — đó là lý do bảng retest phía trên luôn đi kèm cột positive control bên cạnh cột negative test. Đứng ở cả hai vai — người khai thác lỗi và người viết fix — giúp tôi hiểu rõ hơn vì sao nhiều bản fix Authorization ngoài đời chỉ giải quyết được nửa vấn đề: chặn được request sai nhưng lại phá luôn workflow đúng.
 
-Cuối cùng, một bản sửa Authorization đúng cần đạt được tiêu chí `Chặn sai quyền nhưng không phá vỡ đúng quyền`
+Một bản sửa Authorization chỉ thực sự hoàn chỉnh khi nó chặn được truy cập trái phép mà vẫn giữ nguyên các workflow hợp lệ.
 
 ## Tài liệu tham khảo
 
